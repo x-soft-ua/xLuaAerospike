@@ -42,8 +42,14 @@
 #define AS_SHM_CREATE_ERR   3
 #define AS_SHM_TRUNCATE_ERR 4
 #define AS_CLIENT_ERROR     5
+#define AS_WRITE_ERR        6
 
 #define LSTACK_PEEK         100
+
+#define AS_STR              1
+#define AS_INT              2
+#define AS_INCR             3
+
 
 
 /**
@@ -172,7 +178,9 @@ bool print_bin2buf(const char * name, const as_val * value, void * tmpbuf) {
     if (ivalue) {
         lua_pushnumber(this_tmp_buf->L, as_integer_get(ivalue));
     } else {
-       lua_pushstring(this_tmp_buf->L, svalue);
+        memmove(&svalue[0], &svalue[1], strlen(svalue) - 1);
+        memmove(&svalue[strlen(svalue)-2], &svalue[strlen(svalue)], strlen(svalue) - 2);
+        lua_pushstring(this_tmp_buf->L, svalue);
     }
     /* close key */
     lua_settable(this_tmp_buf->L, -3);
@@ -379,8 +387,8 @@ static int lstack_as(lua_State *L){
     const int port = lua_tointeger(L, 4); /* db connection port */
     const char* nameSpace = luaL_checkstring(L, 5); /* db namespace */
     const char* set = luaL_checkstring(L, 6); /* db set */
-    const char* pk = luaL_checkstring(L, 7); /* primary key */
-    const char* stackname = luaL_checkstring(L, 8); /* stack name (binname) */
+    const char* stackname = luaL_checkstring(L, 7); /* stack name (binname) */
+    const char* pk = luaL_checkstring(L, 8); /* primary key */
     const int operation = lua_tointeger(L, 9); /* operation */
     const uint32_t stack_count = lua_tointeger(L, 10); /* stack size */
     //const uint32_t query_timeout = lua_tointeger(L, 11); /* timeout , ms */
@@ -497,12 +505,128 @@ static int lstack_as(lua_State *L){
 
 
 /**
+ * Put bin into record
+ *
+ * @var lua_State *L
+ */
+static int put_bin(lua_State *L){
+
+    as_error err;
+
+    const int new_execution = lua_tointeger(L, 1); /* execute new connection */
+    const char* shaMemId = luaL_checkstring(L, 2); /* id in Shared Memory */
+    const char *hostName = luaL_checkstring(L, 3); /* db connection hostname */
+    const int port = lua_tointeger(L, 4); /* db connection port */
+    const char* nameSpace = luaL_checkstring(L, 5); /* db namespace */
+    const char* set = luaL_checkstring(L, 6); /* db set */
+    const char* binname = luaL_checkstring(L, 7); /* binname */
+    const char* pk = luaL_checkstring(L, 8); /* primary key */
+    const char* binval_str = luaL_checkstring(L, 9); /* binval */
+    const int binval_int = lua_tointeger(L, 10);
+    const int operation = lua_tointeger(L, 11); /* operation */
+
+
+    /* if just run create connection */
+    if(new_execution==1)
+    {
+        const int connect_status = private_connect_as(hostName, port, shaMemId);
+        if(connect_status!=1)
+        {
+            lua_pushnil(L);
+            lua_pushnumber(L, connect_status);
+            lua_pushstring(L, "AS_CONNECT_ERR");
+            return 3;
+        }
+    }
+
+
+    int shm = 0;
+
+    /* open shm segment */
+    if ( (shm = shm_open(shaMemId, O_RDWR, 0777)) == -1 ) {
+        lua_pushnil(L);
+        lua_pushnumber(L, AS_SHM_ERR);
+        lua_pushstring(L, "AS_SHM_ERR");
+        return 3;
+    }
+
+    /* set pointer on aerospike obj */
+    aerospike * as = (aerospike *)mmap(0, sizeof(aerospike), PROT_WRITE|PROT_READ, MAP_SHARED, shm, 0);
+
+
+    as_record rec;
+    as_record_inita(&rec, 2);
+
+    as_key key;
+    as_key_init(&key, nameSpace, set, pk);
+
+    if (operation==AS_STR) {
+        as_record_set_str(&rec, binname, binval_str);
+        if (aerospike_key_put(as, &err, NULL, &key, &rec) != AEROSPIKE_OK) {
+            lua_pushnil(L);
+            lua_pushnumber(L, AS_WRITE_ERR);
+            lua_pushstring(L, "AS_WRITE_ERR");
+            return 3;
+        }
+    }
+    else if(operation==AS_INT)
+    {
+        as_record_set_int64(&rec, binname, binval_int);
+        if (aerospike_key_put(as, &err, NULL, &key, &rec) != AEROSPIKE_OK) {
+            lua_pushnil(L);
+            lua_pushnumber(L, AS_WRITE_ERR);
+            lua_pushstring(L, "AS_WRITE_ERR");
+            return 3;
+        }
+    }
+    else if(operation==AS_INCR)
+    {
+        as_operations ops;
+        as_operations_inita(&ops, 2);
+        as_operations_add_incr(&ops, binname, binval_int);
+        as_operations_add_read(&ops, binname);
+
+        as_record * rec_ = &rec;
+
+        if (aerospike_key_operate(as, &err, NULL, &key, &ops, &rec_) != AEROSPIKE_OK) {
+            lua_pushnil(L);
+            lua_pushnumber(L, AS_WRITE_ERR);
+            lua_pushstring(L, "AS_WRITE_ERR");
+            return 3;
+        }
+
+        as_integer * ivalue = as_record_get_integer(&rec, binname);
+        lua_pushnumber(L, as_integer_get(ivalue));
+        as_integer_destroy(ivalue);
+
+        /* cleaning */
+        as_operations_destroy(&ops);
+    }
+
+
+    /* cleaning */
+    as_record_destroy(&rec);
+    as_key_destroy(&key);
+
+    /* unmap shm */
+    munmap(as, sizeof(aerospike));
+    close(shm);
+
+    /* return result */
+    lua_pushnumber(L, AS_OK);
+    lua_pushstring(L, "AS_OK");
+    return 3;
+}
+
+
+/**
  * Bind methods struct
  */
 static const struct luaL_Reg as_client [] = {
 		{"query_as", query_as},
 		{"disconnect_as", disconnect_as},
 		{"lstack_as", lstack_as},
+		{"put_bin", put_bin},
 		{NULL, NULL}
 };
 

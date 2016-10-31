@@ -5,11 +5,25 @@ local as = require "xLuaAerospikeLayer"
 
 local sysmem = ngx.shared.sysmem;
 
-local M = {}
+local Method = {}
 
-local function get_from_as(host, port, ns, set, where, whereval, query_timeout, operation)
+Method.host = "127.0.0.1"
+Method.port = 3000
+Method.ns = "test"
+Method.set = "demo"
+Method.bin_name = ""
+Method.binval_str = ""
+Method.binval_int = 0
+Method.key_str = ""
+Method.query_timeout = 10
+Method.operation = 1
 
-    if (not operation) then operation = 'none' end
+
+local function as_method(conf)
+
+    for i,v in pairs(conf) do
+        Method[i] = v
+    end
 
     --get worker pid
     wpid = ngx.worker.pid()
@@ -25,10 +39,13 @@ local function get_from_as(host, port, ns, set, where, whereval, query_timeout, 
     AS_CLIENT_ERROR     = 5
     LSTACK_PEEK         = 100
 
-    if(not whereval) then return -2 end
+    AS_STR              = 1
+    AS_INT              = 2
+
+    if(Method.key_str == "") then return -2 end
 
     --shm key
-    shamem_id = 'hc'..host..port..worker_id
+    shamem_id = 'hc' .. Method.host .. Method.port .. worker_id
 
     --init new aerospike connection flag
     newexec = 0
@@ -38,17 +55,18 @@ local function get_from_as(host, port, ns, set, where, whereval, query_timeout, 
     end
 
     get_pk = 0
-    if(operation=='get_pk') then
+    if(Method.operation=='get_pk') then
         --get record via primary key
-        response, err, msg = as.query_as(newexec, shamem_id, host, port, ns, set, where, whereval, query_timeout, 1)
-    elseif(operation=='lstack_peek') then
+        response, err, msg = as.query_as(newexec, shamem_id, Method.host, Method.port, Method.ns, Method.set, Method.bin_name, Method.key_str, Method.query_timeout, 1)
+    elseif(Method.operation=='lstack_peek') then
         --get large stack via secondary key
-        response, err, msg = as.lstack_as(newexec, shamem_id, host, port, ns, set, whereval, where, LSTACK_PEEK, 50)
+        response, err, msg = as.lstack_as(newexec, shamem_id, Method.host, Method.port, Method.ns, Method.set, Method.bin_name, Method.key_str, LSTACK_PEEK, 50)
+    elseif(Method.operation=='put_bin') then
+        response, err, msg = as.put_bin(newexec, shamem_id, Method.host, Method.port, Method.ns, Method.set, Method.bin_name, Method.key_str, Method.binval_str, Method.binval_int, AS_STR)
     else
         --get record via secondary key
-        response, err, msg = as.query_as(newexec, shamem_id, host, port, ns, set, where, whereval, query_timeout, 0)
+        response, err, msg = as.query_as(newexec, shamem_id, Method.host, Method.port, Method.ns, Method.set, Method.bin_name, Method.key_str, Method.query_timeout, 0)
     end
-
 
     if(err==0 and type(response)=='table') then
         return response, 1
@@ -57,12 +75,12 @@ local function get_from_as(host, port, ns, set, where, whereval, query_timeout, 
     end
 
     if(err==AS_NEED_RECONNECT) then
-        err, message = ngx.disconnect_as(shamem_id)
+        err, message = as.disconnect_as(shamem_id)
         sysmem:delete('newexec'..shamem_id)
         return -1
     end
 end
 
-M.get_from_as = get_from_as
+Method.as_method = as_method
 
-return M
+return Method
