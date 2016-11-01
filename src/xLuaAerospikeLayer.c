@@ -178,8 +178,13 @@ bool print_bin2buf(const char * name, const as_val * value, void * tmpbuf) {
     if (ivalue) {
         lua_pushnumber(this_tmp_buf->L, as_integer_get(ivalue));
     } else {
-        memmove(&svalue[0], &svalue[1], strlen(svalue) - 1);
-        memmove(&svalue[strlen(svalue)-2], &svalue[strlen(svalue)], strlen(svalue) - 2);
+        if (svalue[0] == '"'){
+            memmove(&svalue[0], &svalue[1], strlen(svalue));
+        }
+        if (svalue[strlen(svalue)-1] == '"'){
+            svalue[strlen(svalue)-1] = 0;
+        }
+
         lua_pushstring(this_tmp_buf->L, svalue);
     }
     /* close key */

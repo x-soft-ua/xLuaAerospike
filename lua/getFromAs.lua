@@ -1,16 +1,27 @@
+local json = require "lib.json"
+
+
+local asKey = 'new_test_key'
+
 local as_layer = require "lib.xLuaAerospike"
+local as_connection = as_layer.as_conf_init("127.0.0.1", 3000, "test", "demo")
 
-host = '127.0.0.1'
-port = 3000
-query_timeout = 10
-ns = 'test'
-set = 'demo'
-where = 'pk'
-whereval = 'key1'
-
-return_table_dmp_rec, return_ok = as_layer.get_from_as(host, port, ns, set, where, whereval, query_timeout, 'get_pk')
-
-if(return_ok) then
-    --return_table_dmp_rec
+local count, status = as_layer.as_bin_incr(as_connection, asKey, "incr", 15)
+if (status == as_layer.AS_LAYER_OK) then
+    ngx.say("Incr count = "..count)
 end
 
+local status = as_layer.as_bin_set(as_connection, asKey, "strval", ngx.md5(ngx.now()))
+if (status == as_layer.AS_LAYER_OK) then
+    ngx.say("Set strval ok")
+end
+
+local status = as_layer.as_bin_set(as_connection, asKey, "intval", ngx.now())
+if (status == as_layer.AS_LAYER_OK) then
+    ngx.say("Set intval ok")
+end
+
+local rec, status = as_layer.as_get_record(as_connection, asKey, "incr")
+if (status == as_layer.AS_LAYER_OK) then
+    ngx.say("Get record = " .. json:encode(rec))
+end
