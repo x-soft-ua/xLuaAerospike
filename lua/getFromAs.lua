@@ -21,7 +21,7 @@ if (status == as_layer.AS_LAYER_OK) then
     ngx.say("Set intval ok")
 end
 
-local rec, status = as_layer.as_get_record(as_connection, asKey, "incr")
+local rec, status = as_layer.as_get_record(as_connection, asKey)
 if (status == as_layer.AS_LAYER_OK) then
     ngx.say("Get record = " .. json:encode(rec))
 end
